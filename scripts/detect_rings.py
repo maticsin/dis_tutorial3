@@ -18,6 +18,7 @@ from sklearn.decomposition import PCA
 from collections import Counter
 import webcolors
 import tf2_geometry_msgs as tfg
+import time
 
 
 class DetectRings(Node):
@@ -51,7 +52,7 @@ class DetectRings(Node):
 		self.rings = []
 		self.id = 0
 		self.latest_cloud = None
-
+		self.distTresh = 0.75
 		self.get_logger().info("Node initialized")
 	
 	def createMarker(self, data, pos, color, loc):
@@ -83,6 +84,18 @@ class DetectRings(Node):
 		marker.pose.position.z = float(pos[2])
 
 		return marker
+	
+	def marker_nearby(self, pointin):
+		d = np.array([pointin.point.x, pointin.point.y])
+		for marker in self.rings:
+			ar = marker
+			self.get_logger()
+			dist = np.linalg.norm(ar[:2] - d[:2])
+			if dist < self.distTresh:
+				self.get_logger().info(f"The distance to other markers{dist}")
+				return True
+		return False
+	
 
 
 	def closest_colour(self, requested_colour):
@@ -153,7 +166,6 @@ class DetectRings(Node):
 
 			cv2.circle(rings_detected_img, (bottom_x, bottom_y), 5, (255, 0, 0), -1)
 
-
 			if not valid:
 				continue
 
@@ -176,27 +188,34 @@ class DetectRings(Node):
 									   f"of color '{ring_color_name}' near ({center_x}, {center_y})")
 				
 				point_in_cam_frame = PointStamped()
-				point_in_cam_frame.header.frame_id = pc_msg.header.frame_id
-				point_in_cam_frame.header.stamp = pc_msg.header.stamp
+				point_in_cam_frame.header.frame_id = "/base_link"
+				point_in_cam_frame.header.stamp = self.get_clock().now().to_msg()
+
 				point_in_cam_frame.point.x = float(coords_3d[0])
 				point_in_cam_frame.point.y = float(coords_3d[1])
 				point_in_cam_frame.point.z = float(coords_3d[2])
 
 				try:
 					transform_stamped = self.tf_buffer.lookup_transform(
-						"map",  # ali 'base_link'
-						pc_msg.header.frame_id,
-						rclpy.time.Time(seconds=0)
+						"map", 
+						"base_link",
+						rclpy.time.Time()
 					)
+
 					point_in_map_frame = tfg.do_transform_point(point_in_cam_frame, transform_stamped)
 					ring_marker = self.createMarker(
 						rgb_msg,
 						[point_in_map_frame.point.x,
 						point_in_map_frame.point.y,
-						point_in_map_frame.point.z],
+						point_in_map_frame.point.z],	
 						[1, 0, 1],
 						"map"
 					)
+					if self.marker_nearby(point_in_map_frame):
+						self.get_logger().info(f"Ring already saved")
+						continue
+					temp = [point_in_map_frame.point.x,point_in_map_frame.point.y]
+					self.rings.append(temp)
 					self.marker_pub.publish(ring_marker)
 					self.get_logger().info(
 						f"Ring at map coords: "

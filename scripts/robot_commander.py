@@ -102,6 +102,12 @@ class RobotCommander(Node):
             self.face_marker_callback, 
             qos_profile_sensor_data
         )
+        self.ring_marker_sub = self.create_subscription(
+            Marker, 
+            '/ring_marker',
+            self.ring_marker_callback, 
+            qos_profile_sensor_data
+        )
         self.next_move = []
         self.get_logger().info(f"Robot commander has been initialized!")
         
@@ -115,6 +121,21 @@ class RobotCommander(Node):
         if len(self.next_move) >= 1:
             i = 1
             while i < len(self.next_move) and self.next_move[i][3] == "face":
+                i += 1
+            self.next_move.insert(i, marker_tuple)
+        else:
+            self.next_move.append(marker_tuple)
+
+    def ring_marker_callback(self, msg):
+        print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
+
+        #check for nex available spot in next move
+
+        marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "ring")
+
+        if len(self.next_move) >= 1:
+            i = 1
+            while i < len(self.next_move) and self.next_move[i][3] == "ring":
                 i += 1
             self.next_move.insert(i, marker_tuple)
         else:
