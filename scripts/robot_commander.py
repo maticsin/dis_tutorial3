@@ -34,6 +34,10 @@ from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
+import json
+from std_msgs.msg import String
+
+from visualization_msgs.msg import Marker
 
 
 class TaskResult(Enum):
@@ -63,6 +67,10 @@ class RobotCommander(Node):
         self.initial_pose_received = False
         self.is_docked = None
 
+        self.obrazi = 0
+
+        self.Markers = None
+
         # ROS2 subscribers
         self.create_subscription(DockStatus,
                                  'dock_status',
@@ -78,6 +86,9 @@ class RobotCommander(Node):
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped,
                                                       'initialpose',
                                                       10)
+        self.next_marker_pub = self.create_publisher(Marker, "/aaaa", QoSReliabilityPolicy.BEST_EFFORT)
+        self.tts_pub = self.create_publisher(String, '/tts', 10)
+        self.spoken = False
         
         # ROS2 Action clients
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -85,8 +96,32 @@ class RobotCommander(Node):
         self.undock_action_client = ActionClient(self, Undock, 'undock')
         self.dock_action_client = ActionClient(self, Dock, 'dock')
 
+        self.stop_marker_sub = self.create_subscription(
+            Marker, 
+            '/stop_point',
+            self.face_marker_callback, 
+            qos_profile_sensor_data
+        )
+        self.next_move = []
         self.get_logger().info(f"Robot commander has been initialized!")
         
+    def face_marker_callback(self, msg):
+        print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
+
+        #check for nex available spot in next move
+
+        marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "face")
+
+        if len(self.next_move) >= 1:
+            i = 1
+            while i < len(self.next_move) and self.next_move[i][3] == "face":
+                i += 1
+            self.next_move.insert(i, marker_tuple)
+        else:
+            self.next_move.append(marker_tuple)
+
+
+
     def destroyNode(self):
         self.nav_to_pose_client.destroy()
         super().destroy_node()     
@@ -106,8 +141,8 @@ class RobotCommander(Node):
         send_goal_future = self.nav_to_pose_client.send_goal_async(goal_msg,
                                                                    self._feedbackCallback)
         rclpy.spin_until_future_complete(self, send_goal_future)
-        self.goal_handle = send_goal_future.result()
 
+        self.goal_handle = send_goal_future.result()
         if not self.goal_handle.accepted:
             self.error('Goal to ' + str(pose.pose.position.x) + ' ' +
                        str(pose.pose.position.y) + ' was rejected!')
@@ -297,38 +332,164 @@ class RobotCommander(Node):
         self.get_logger().debug(msg)
         return
     
+    def toPose(self, move):
+        goal_pose = PoseStamped()
+        goal_pose.header.frame_id = 'map'
+        goal_pose.header.stamp = self.get_clock().now().to_msg()
+        goal_pose.pose.position.x = float(move[0])
+        goal_pose.pose.position.y = float(move[1])
+        goal_pose.pose.orientation = move[2]
+        return goal_pose
+    
+    def createMarker(self, pos, color, loc, id):
+        marker = Marker()
+        marker.header.frame_id = loc
+        marker.header.stamp = self.get_clock().now().to_msg()
+        
+        marker.type = marker.SPHERE
+        marker.id = id
+
+        # Set the scale of the marker
+        scale = 0.3
+        marker.scale.x = scale
+        marker.scale.y = scale
+        marker.scale.z = scale
+
+        # Set the color
+        marker.color.r = float(color[0])
+        marker.color.g = float(color[1])
+        marker.color.b = float(color[2])
+        marker.color.a = 1.0
+
+        # Set the pose of the marker
+        marker.pose.position.x = float(pos[0])
+        marker.pose.position.y = float(pos[1])
+        marker.pose.position.z = float(0)
+
+        return marker
+
+    
 def main(args=None):
     
     rclpy.init(args=args)
     rc = RobotCommander()
-
-    # Wait until Nav2 and Localizer are available
     rc.waitUntilNav2Active()
 
-    # Check if the robot is docked, only continue when a message is recieved
     while rc.is_docked is None:
         rclpy.spin_once(rc, timeout_sec=0.5)
 
-    # If it is docked, undock it first
     if rc.is_docked:
         rc.undock()
+
+    rc.next_move = [(-0.15, -1.5, rc.YawToQuaternion(4), "path"), 
+                    (-0.8, -0.5, rc.YawToQuaternion(3), "path"), #
+                    (-1, 1, rc.YawToQuaternion(3), "path"), 
+                    ( 0 , 2, rc.YawToQuaternion(0), "path"),
+                    ( -1.5 , 4, rc.YawToQuaternion(2), "path"), #
+                    ( 0 , 3.3, rc.YawToQuaternion(4), "path"),
+                    ( 1.5 , 3.3, rc.YawToQuaternion(4), "path"),
+                    ( 2.2 , 2, rc.YawToQuaternion(3), "path"),
+                    ( 1 , 0, rc.YawToQuaternion(5), "path"),
+                    ( 2.5 , -1, rc.YawToQuaternion(2), "path"),
+                    ( 2 , -1.8, rc.YawToQuaternion(5), "path"),
+                    ( 1 , -2, rc.YawToQuaternion(2), "path"),
+                    ( 0 , -2, rc.YawToQuaternion(2), "path"),]
+
+
+    while len(rc.next_move):
+        nextMarker = rc.createMarker(rc.next_move[0], [0, 0, 1], "/map", 0)
+        rc.next_marker_pub.publish(nextMarker)
+
+
+        rc.goToPose(rc.toPose(rc.next_move[0]))
+        while not rc.isTaskComplete():
+            # rc.info("Waiting for the task to complete...")
+            # print(len(rc.next_move))
+            # rclpy.spin_once(rc)
+            if len(rc.next_move) >= 2:
+                if rc.next_move[1][3] == "face" and rc.next_move[0][3] == "path":
+                    #save current position to come back and move the next point not implemented
+                    curr_pose_stamped = PoseStamped()
+                    curr_pose_stamped.header.frame_id = 'map'
+                    curr_pose_stamped.header.stamp = rc.get_clock().now().to_msg()
+                    curr_pose_stamped.pose = rc.current_pose.pose
+
+                    curr_pos = (
+                        curr_pose_stamped.pose.position.x,
+                        curr_pose_stamped.pose.position.y,
+                        curr_pose_stamped.pose.orientation,
+                        "path_back"
+                    )
+
+                    curr_next_pos = rc.next_move[0]
+
+                    i = 1
+                    while i < len(rc.next_move) and rc.next_move[i][3] == "face":
+                        i += 1
+
+                    if(len(rc.next_move) > i):
+                        rc.next_move.insert(i, curr_pos)
+                        rc.next_move.insert(i+1, curr_next_pos)
+                    else: 
+                        rc.next_move.append(curr_pos)
+                        rc.next_move.append(curr_next_pos)
+
+                    print(len(rc.next_move))
+
+                    for a in rc.next_move:
+                        print(a[1])
+
+                    rc.cancelTask()
+                    print("canceled")
+                elif rc.next_move[1][3] == "face" and rc.next_move[0][3] == "path_back":
+                    curr_next_pos = rc.next_move[0]
+
+                    i = 1
+                    while i < len(rc.next_move) and rc.next_move[i][3] == "face":
+                        i += 1
+
+                    if(len(rc.next_move) > i):
+                        rc.next_move.insert(i, curr_next_pos)
+                    else: 
+                        rc.next_move.append(curr_next_pos)
+
+                    print(len(rc.next_move))
+
+                    for a in rc.next_move:
+                        print(a[1])
+
+                    rc.cancelTask()
+                    print("canceled")
+
+        #stop say hello
+        if (rc.next_move[0][3] == "face"):
+            
+            msg = String()
+            msg.data = "Hello, there stranger hello."
+            rc.tts_pub.publish(msg)
+            rc.spoken = True
+            rc.get_logger().info("Message published to /tts: Hello ") 
+            print("Hello")
+            time.sleep(3)
+        elif (rc.next_move[0][3] == "ring"):
+            print("stop")
+        else:
+            print("finished next move")
+            
+        rc.next_move.pop(0)
+
+        if (len(rc.next_move) > 0):
+            print(rc.next_move[0][1])
+
+
+    msg = String()
+    msg.data = "I did the task."
+    rc.tts_pub.publish(msg)
+    time.sleep(3)
     
-    # Finally send it a goal to reach
-    goal_pose = PoseStamped()
-    goal_pose.header.frame_id = 'map'
-    goal_pose.header.stamp = rc.get_clock().now().to_msg()
 
-    goal_pose.pose.position.x = 2.6
-    goal_pose.pose.position.y = -1.3
-    goal_pose.pose.orientation = rc.YawToQuaternion(0.57)
+    # rclpy.spin(rc)
 
-    rc.goToPose(goal_pose)
-
-    while not rc.isTaskComplete():
-        rc.info("Waiting for the task to complete...")
-        time.sleep(1)
-
-    rc.spin(-0.57)
 
     rc.destroyNode()
 

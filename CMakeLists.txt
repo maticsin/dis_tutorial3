@@ -29,6 +29,9 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/detect_people.py
   scripts/robot_commander.py
+  scripts/TTS_node.py
+  scripts/detect_rings.py
+  scripts/detectRings.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
