@@ -307,11 +307,17 @@ class DetectRings(Node):
 		for n in range(len(ellipses)):
 			for m in range(n + 1, len(ellipses)):
 				e1, e2 = ellipses[n], ellipses[m]
+
+				# Centers and angle difference
 				dist = np.hypot(e1[0][0] - e2[0][0], e1[0][1] - e2[0][1])
 				angle_diff = min(abs(e1[2] - e2[2]), 180.0 - abs(e1[2] - e2[2]))
-				if dist >= 10 or angle_diff > 10:
+
+				# Average size for relative checks
+				avg_radius = (e1[1][0] + e1[1][1] + e2[1][0] + e2[1][1]) / 4
+				if dist >= avg_radius * 1.2 or angle_diff > 5:
 					continue
 
+				# Identify large/small ellipses
 				e1_axes = sorted(e1[1])
 				e2_axes = sorted(e2[1])
 				if e1_axes[1] >= e2_axes[1] and e1_axes[0] >= e2_axes[0]:
@@ -321,19 +327,33 @@ class DetectRings(Node):
 				else:
 					continue
 
+				# Aspect ratio similarity
 				aspect1 = e1_axes[1] / e1_axes[0] if e1_axes[0] > 0 else float('inf')
 				aspect2 = e2_axes[1] / e2_axes[0] if e2_axes[0] > 0 else float('inf')
-				if abs(aspect1 - aspect2) > 0.5:
+				if abs(aspect1 - aspect2) > 0.2:
 					continue
 
+				# Axis check
 				if any(ax[0] == 0 for ax in (le[1], se[1])):
 					continue
 
+				# Ellipticity check
 				le_ar = max(le[1]) / min(le[1])
 				se_ar = max(se[1]) / min(se[1])
-				if le_ar > 1.5 or se_ar > 1.8:
+				if le_ar > 1.3 or se_ar > 1.5:
 					continue
 
+				# Size ratio validation
+				size_ratio = max(le[1]) / max(se[1])
+				if size_ratio > 2.0 or size_ratio < 1.2:
+					continue
+
+				# Concentric center check
+				center_offset = np.hypot(le[0][0] - se[0][0], le[0][1] - se[0][1])
+				if center_offset > min(le[1]) * 0.2:
+					continue
+
+				# Border thickness consistency
 				border_major = (max(le[1]) - max(se[1])) / 2.0
 				border_minor = (min(le[1]) - min(se[1])) / 2.0
 				if border_minor <= 0 or abs(border_major - border_minor) > 5:
@@ -373,13 +393,42 @@ class DetectRings(Node):
 
 		if depth.size == 0:
 			return (False, None, None, None, None, None, None)
+		
+		(cx, cy) = (int(le[0][0]), int(le[0][1]))
+		(axes_x, axes_y) = (int(le[1][0] / 2), int(le[1][1] / 2))
+		angle = int(le[2])
+		ellipse_points = cv2.ellipse2Poly((cx, cy), (axes_x, axes_y), angle, 0, 360, 1)
+		if ellipse_points.size == 0:
+			self.get_logger().warn("ellipse2Poly returned no points.")
+			return (False, None, None, None, None, None, None)
 
-		z_min = np.min(depth)
+		best_top_y = height     # začnemo z manjšim, ker iščemo minimalno y
+		top_pt_2d  = None
+
+		for (px, py) in ellipse_points:
+			# Preverimo, da ne gremo čez meje slike
+			if not (0 <= px < width and 0 <= py < height):
+				continue
+			
+			# Preverimo, da je globina veljavna (če želite izločiti NaN/Inf)
+			z_val = a[py, px, 2]
+			if not np.isfinite(z_val):
+				continue
+
+			if py < best_top_y:
+				best_top_y = py
+				top_pt_2d = (px, py)
+
+		if top_pt_2d is None:
+			z_min = a[bottom_pt_2d[1], bottom_pt_2d[0], 2]
+		else:
+			z_min = np.min(depth)
+		print(f"z_min: {z_min}, centerDepth: {centerDepth}")
 		if z_min > 2:
 			return (False, None, None, None, None, None, None)
 
 		z_range = centerDepth - z_min
-		ring_type = "3D" if z_range > 0.5 else "2D"
+		ring_type = "3D" if z_range > 1 else "2D"
 
 		# Ustvarimo masko in preberemo barvo (kot prej)
 		ring_mask = np.zeros((height, width), dtype=np.uint8)
@@ -408,6 +457,7 @@ class DetectRings(Node):
 		best_y = -1
 		best_left_x = width     # začnemo z večjim, ker iščemo minimalno x
 		best_right_x = -1       # začnemo z manjšim, ker iščemo maksimalno x
+		best_top_y = height     # začnemo z manjšim, ker iščemo minimalno y
 
 		bottom_pt_2d = None
 		left_pt_2d   = None
@@ -437,6 +487,10 @@ class DetectRings(Node):
 			if px > best_right_x:
 				best_right_x = px
 				right_pt_2d  = (px, py)
+
+			if py < best_top_y:
+				best_top_y = py
+				top_pt_2d = (px, py)
 
 		# Če so te točke None, pomeni, da nismo našli nobene veljavne točke na ustreznem koncu.
 		if bottom_pt_2d is None:
