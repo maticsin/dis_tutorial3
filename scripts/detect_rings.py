@@ -307,11 +307,17 @@ class DetectRings(Node):
 		for n in range(len(ellipses)):
 			for m in range(n + 1, len(ellipses)):
 				e1, e2 = ellipses[n], ellipses[m]
+
+				# Centers and angle difference
 				dist = np.hypot(e1[0][0] - e2[0][0], e1[0][1] - e2[0][1])
 				angle_diff = min(abs(e1[2] - e2[2]), 180.0 - abs(e1[2] - e2[2]))
-				if dist >= 10 or angle_diff > 10:
+
+				# Average size for relative checks
+				avg_radius = (e1[1][0] + e1[1][1] + e2[1][0] + e2[1][1]) / 4
+				if dist >= avg_radius * 1.2 or angle_diff > 5:
 					continue
 
+				# Identify large/small ellipses
 				e1_axes = sorted(e1[1])
 				e2_axes = sorted(e2[1])
 				if e1_axes[1] >= e2_axes[1] and e1_axes[0] >= e2_axes[0]:
@@ -321,19 +327,33 @@ class DetectRings(Node):
 				else:
 					continue
 
+				# Aspect ratio similarity
 				aspect1 = e1_axes[1] / e1_axes[0] if e1_axes[0] > 0 else float('inf')
 				aspect2 = e2_axes[1] / e2_axes[0] if e2_axes[0] > 0 else float('inf')
-				if abs(aspect1 - aspect2) > 0.5:
+				if abs(aspect1 - aspect2) > 0.2:
 					continue
 
+				# Axis check
 				if any(ax[0] == 0 for ax in (le[1], se[1])):
 					continue
 
+				# Ellipticity check
 				le_ar = max(le[1]) / min(le[1])
 				se_ar = max(se[1]) / min(se[1])
-				if le_ar > 1.5 or se_ar > 1.8:
+				if le_ar > 1.3 or se_ar > 1.5:
 					continue
 
+				# Size ratio validation
+				size_ratio = max(le[1]) / max(se[1])
+				if size_ratio > 2.0 or size_ratio < 1.2:
+					continue
+
+				# Concentric center check
+				center_offset = np.hypot(le[0][0] - se[0][0], le[0][1] - se[0][1])
+				if center_offset > min(le[1]) * 0.2:
+					continue
+
+				# Border thickness consistency
 				border_major = (max(le[1]) - max(se[1])) / 2.0
 				border_minor = (min(le[1]) - min(se[1])) / 2.0
 				if border_minor <= 0 or abs(border_major - border_minor) > 5:
@@ -375,11 +395,12 @@ class DetectRings(Node):
 			return (False, None, None, None, None, None, None)
 
 		z_min = np.min(depth)
+		print(f"z_min: {z_min}, centerDepth: {centerDepth}")
 		if z_min > 2:
 			return (False, None, None, None, None, None, None)
 
 		z_range = centerDepth - z_min
-		ring_type = "3D" if z_range > 0.5 else "2D"
+		ring_type = "3D" if z_range > 1 else "2D"
 
 		# Ustvarimo masko in preberemo barvo (kot prej)
 		ring_mask = np.zeros((height, width), dtype=np.uint8)
