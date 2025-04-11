@@ -458,6 +458,37 @@ class RobotCommander(Node):
         marker.pose.position.z = float(0)
 
         return marker
+    
+    def createAndPublishTestMarkers(self):
+        """
+        Ustvari in objavi vrsto markerjev (modre krogle) v '/map' okvirju
+        na vnaprej definiranih koordinatah.
+        """
+
+        test_points = [
+            (-0.15, -1.5, self.YawToQuaternion(4), "path"), 
+            (-0.8, -0.5, self.YawToQuaternion(3), "path"),
+            (-1.3, 0.5, self.YawToQuaternion(3), "path"), 
+            (0, 2, self.YawToQuaternion(0), "path"),
+            (-1.5, 4.5, self.YawToQuaternion(2), "path"), 
+            (0, 3.3, self.YawToQuaternion(4), "path"),
+            (1.5, 3.3, self.YawToQuaternion(4), "path"),
+            (2.2, 2, self.YawToQuaternion(3), "path"),
+            (1, 0, self.YawToQuaternion(5), "path"),
+            (2.5, -1, self.YawToQuaternion(2), "path"),
+            (2, -1.8, self.YawToQuaternion(5), "path"),
+            (1, -2, self.YawToQuaternion(2), "path"),
+            (0, -2, self.YawToQuaternion(2), "path"),
+        ]
+        
+        # Preprosto gremo čez vse točke, ustvarimo marker in ga objavimo.
+        for i, (x, y, orientation, path_type) in enumerate(test_points):
+            # Za demonstration: barva modra [0,0,1]
+            marker = self.createMarker((x, y), [0, 0, 1], "/map", i)
+            # Publikacija
+            self.next_marker_pub.publish(marker)
+            self.get_logger().info(f"Published marker {i} at ({x}, {y})")
+
 
     
 def main(args=None):
@@ -474,7 +505,7 @@ def main(args=None):
 
     rc.next_move = [(-0.15, -1.5, rc.YawToQuaternion(4), "path"), 
                     (-0.8, -0.5, rc.YawToQuaternion(3), "path"), #
-                    (-1.3, 0.5, rc.YawToQuaternion(3), "path"), 
+                    (-1.3, -0.5, rc.YawToQuaternion(3), "path"), 
                     ( 0 , 2, rc.YawToQuaternion(0), "path"),
                     ( -1.5 , 4.5, rc.YawToQuaternion(2), "path"), #
                     ( 0 , 3.3, rc.YawToQuaternion(4), "path"),
@@ -567,7 +598,7 @@ def main(args=None):
             time.sleep(3)
         elif (rc.next_move[0][3] == "ring"):
             msg = String()
-            msg.data = rc.next_move[0][4] + "ring"
+            msg.data = rc.next_move[0][4] + " ring"
             rc.tts_pub.publish(msg)
             rc.spoken = True
             rc.get_logger().info("Message published to /tts: Hello ") 
