@@ -16,7 +16,7 @@
 
 from enum import Enum
 import time
-
+import math
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import Quaternion, PoseStamped, PoseWithCovarianceStamped
@@ -34,7 +34,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
-import json
 from std_msgs.msg import String
 
 from visualization_msgs.msg import Marker
@@ -67,7 +66,8 @@ class RobotCommander(Node):
         self.initial_pose_received = False
         self.is_docked = None
 
-        self.obrazi = 0
+        self.faces = 0
+        self.rings = 0
 
         self.Markers = None
 
@@ -104,43 +104,104 @@ class RobotCommander(Node):
         )
         self.ring_marker_sub = self.create_subscription(
             Marker, 
-            '/ring_marker',
+            '/ring_stop_marker',
             self.ring_marker_callback, 
             qos_profile_sensor_data
         )
         self.next_move = []
         self.get_logger().info(f"Robot commander has been initialized!")
+
+
+    def chain_sort_next_move(self):
+        """
+        Najprej ohranimo prvi element (t. i. 'trenutni cilj').
+        Za vse ostale točke v self.next_move izvedemo 'verižno' sortiranje,
+        kjer vsaka naslednja točka je najbližja prejšnji izbrani.
+        """
+
+        # Če imamo manj kot 2 elementa, ni kaj sortirati
+        if len(self.next_move) < 2:
+            return
+
+        # 1) Shranimo prvi element (trenutni cilj), ki se ne spreminja
+        first_item = self.next_move[0]
+
+        # 2) Preostale točke damo v 'points'
+        points = self.next_move[1:]
+
+        # 3) Počistimo originalni seznam in vrnemo first_item nazaj
+        self.next_move = [first_item]
+
+        # 4) current_position = pozicija first_item, ker želimo,
+        #    da se naslednje točke razvrstijo glede na njo in vse naslednje
+        current_position = (first_item[0], first_item[1])
+
+        ordered_path = []
+
+        # 5) Dokler ima 'points' točke, iščemo najbližjo k 'current_position'
+        while points:
+            nearest_idx = None
+            nearest_dist = float('inf')
+
+            for i, item in enumerate(points):
+                # item je (x, y, orientation, type, (optionally text))
+                dx = item[0] - current_position[0]
+                dy = item[1] - current_position[1]
+                dist = math.hypot(dx, dy)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_idx = i
+
+            # Najbližjo odstranimo iz 'points' in jo dodamo v 'ordered_path'
+            best_item = points.pop(nearest_idx)
+            ordered_path.append(best_item)
+
+            # Posodobimo 'current_position'
+            current_position = (best_item[0], best_item[1])
+
+        # 6) Na koncu 'verižnega' iskanja dodamo 'ordered_path' na konec self.next_move
+        self.next_move.extend(ordered_path)
+
         
     def face_marker_callback(self, msg):
         print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
+
+        self.faces += 1
+
+        if self.faces == 3:
+            self.erasePath()
 
         #check for nex available spot in next move
 
         marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "face")
 
-        if len(self.next_move) >= 1:
-            i = 1
-            while i < len(self.next_move) and self.next_move[i][3] == "face":
-                i += 1
-            self.next_move.insert(i, marker_tuple)
-        else:
-            self.next_move.append(marker_tuple)
+        self.next_move.append(marker_tuple)
+        if hasattr(self, 'current_pose'):
+            self.chain_sort_next_move()
+            print(self.next_move)
 
     def ring_marker_callback(self, msg):
         print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
 
+        self.rings += 1
+
+        if self.rings == 4:
+            self.erasePath()
+
         #check for nex available spot in next move
 
-        marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "ring")
+        marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "ring", msg.text) 
 
-        if len(self.next_move) >= 1:
-            i = 1
-            while i < len(self.next_move) and self.next_move[i][3] == "ring":
-                i += 1
-            self.next_move.insert(i, marker_tuple)
-        else:
-            self.next_move.append(marker_tuple)
+        self.next_move.append(marker_tuple)
+        if hasattr(self, 'current_pose'):
+            self.chain_sort_next_move()
+            print(self.next_move)
 
+    def erasePath(self):
+        self.next_move = [
+            item for item in self.next_move
+            if item[3] != 'path'
+        ]
 
 
     def destroyNode(self):
@@ -415,6 +476,7 @@ def main(args=None):
                     ( 2 , -1.8, rc.YawToQuaternion(5), "path"),
                     ( 1 , -2, rc.YawToQuaternion(2), "path"),
                     ( 0 , -2, rc.YawToQuaternion(2), "path"),]
+    
 
 
     while len(rc.next_move):
@@ -493,7 +555,13 @@ def main(args=None):
             print("Hello")
             time.sleep(3)
         elif (rc.next_move[0][3] == "ring"):
-            print("stop")
+            msg = String()
+            msg.data = "Hello, there " + rc.next_move[0][4] + "ring hello."
+            rc.tts_pub.publish(msg)
+            rc.spoken = True
+            rc.get_logger().info("Message published to /tts: Hello ") 
+            print(rc.next_move[0][4])
+            time.sleep(3)
         else:
             print("finished next move")
             

@@ -7,7 +7,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, QoSReliabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2
-from geometry_msgs.msg import PointStamped, Point
+from geometry_msgs.msg import PointStamped, Point, Quaternion
 from visualization_msgs.msg import Marker
 from std_msgs.msg import Header
 from cv_bridge import CvBridge, CvBridgeError
@@ -19,6 +19,7 @@ from collections import Counter
 import webcolors
 import tf2_geometry_msgs as tfg
 import time
+from turtle_tf2_py.turtle_tf2_broadcaster import quaternion_from_euler
 
 
 class DetectRings(Node):
@@ -29,6 +30,7 @@ class DetectRings(Node):
 
 		# Topics
 		self.marker_topic = "/ring_marker"
+		self.stop_marker_topic = "/ring_stop_marker"
 
 		# ROS Setup
 		self.bridge = CvBridge()
@@ -45,17 +47,17 @@ class DetectRings(Node):
 		self.ts.registerCallback(self.synced_callback)
 
 		self.marker_pub = self.create_publisher(Marker, self.marker_topic, QoSReliabilityPolicy.BEST_EFFORT)
+		self.stop_marker_pub = self.create_publisher(Marker, self.stop_marker_topic, QoSReliabilityPolicy.BEST_EFFORT)
 
-
-
-		# State
+		# StateTT
 		self.rings = []
 		self.id = 0
 		self.latest_cloud = None
 		self.distTresh = 0.75
+		self.stopDist = 0.7
 		self.get_logger().info("Node initialized")
 	
-	def createMarker(self, data, pos, color, loc):
+	def createMarker(self, data, pos, color, loc, text=""):
 		# create marker
 		marker = Marker()
 
@@ -65,6 +67,10 @@ class DetectRings(Node):
 		marker.type = marker.SPHERE
 		marker.id = self.id 
 		self.id += 1
+
+		if text != "":
+			marker.type = Marker.TEXT_VIEW_FACING
+			marker.text = text
 
 		# Set the scale of the marker
 		scale = 0.3
@@ -97,6 +103,19 @@ class DetectRings(Node):
 		return False
 	
 
+	def YawToQuaternion(self, angle_z = 0.):
+		quat_tf = quaternion_from_euler(0, 0, angle_z)
+
+		# Convert a list to geometry_msgs.msg.Quaternion
+		quat_msg = Quaternion(x=quat_tf[0], y=quat_tf[1], z=quat_tf[2], w=quat_tf[3])
+		return quat_msg
+
+	def compute_yaw_from_face(self, robot_position, face_position):
+		dx = face_position[0] - robot_position[0]
+		dy = face_position[1] - robot_position[1]
+		yaw = math.atan2(dy, dx)
+		quaternion = self.YawToQuaternion(yaw)
+		return quaternion
 
 	def closest_colour(self, requested_colour):
 		distances = {}
@@ -160,11 +179,9 @@ class DetectRings(Node):
 				continue
 			processed_centers.append((center_x, center_y))
 
-			valid, ring_type, ring_color_name, coords_3d, bottom_x, bottom_y = self.analyze_ring_candidate(
-    		le, se, center_x, center_y, pc_msg, rgb_image
-)
+			valid, ring_type, ring_color_name, bottom_pt_2d, left_pt_2d, right_pt_2d, a = self.analyze_ring_candidate(
+    		le, se, center_x, center_y, pc_msg, rgb_image)
 
-			cv2.circle(rings_detected_img, (bottom_x, bottom_y), 5, (255, 0, 0), -1)
 
 			if not valid:
 				continue
@@ -191,9 +208,11 @@ class DetectRings(Node):
 				point_in_cam_frame.header.frame_id = "/base_link"
 				point_in_cam_frame.header.stamp = self.get_clock().now().to_msg()
 
-				point_in_cam_frame.point.x = float(coords_3d[0])
-				point_in_cam_frame.point.y = float(coords_3d[1])
-				point_in_cam_frame.point.z = float(coords_3d[2])
+				C = a[bottom_pt_2d[1], bottom_pt_2d[0], :]
+
+				point_in_cam_frame.point.x = float(C[0])
+				point_in_cam_frame.point.y = float(C[1])
+				point_in_cam_frame.point.z = float(C[2])
 
 				try:
 					transform_stamped = self.tf_buffer.lookup_transform(
@@ -214,15 +233,48 @@ class DetectRings(Node):
 					if self.marker_nearby(point_in_map_frame):
 						self.get_logger().info(f"Ring already saved")
 						continue
+
+					L = a[left_pt_2d[1], left_pt_2d[0], :]
+					R = a[right_pt_2d[1], right_pt_2d[0], :]
+
+					vec = L- R
+					vec2d = np.array([vec[0], vec[1]])
+					# 90 degrees rotation
+					n = np.array([-vec2d[1], vec2d[0]])
+					norm_n = np.linalg.norm(n)
+					if norm_n < 1e-5:
+						self.get_logger().warn("Bounds are too close!")
+						continue
+					n = n / norm_n 
+
+					C2d = np.array([C[0], C[1]]) 
+					stop_2d = C2d + self.stopDist * n
+
+					
+					stop_3d = np.array([stop_2d[0], stop_2d[1], C[2]])
+
+					point_in_cam_frame.point.x = float(stop_3d[0])
+					point_in_cam_frame.point.y = float(stop_3d[1])
+					point_in_cam_frame.point.z = float(stop_3d[2])
+
+					stop_point_in_map_frame = tfg.do_transform_point(point_in_cam_frame, transform_stamped)
+
+
+					coords = [
+						stop_point_in_map_frame.point.x,
+						stop_point_in_map_frame.point.y,
+						stop_point_in_map_frame.point.z
+					]
+					
+					stopMarker = self.createMarker(rgb_msg,coords,[0,1,1], "map", ring_color_name)
 					temp = [point_in_map_frame.point.x,point_in_map_frame.point.y]
+					stopMarker.pose.orientation = self.compute_yaw_from_face(coords, temp)
+					self.stop_marker_pub.publish(stopMarker)
+
+
 					self.rings.append(temp)
 					self.marker_pub.publish(ring_marker)
-					self.get_logger().info(
-						f"Ring at map coords: "
-						f"({point_in_map_frame.point.x:.2f}, "
-						f"{point_in_map_frame.point.y:.2f}, "
-						f"{point_in_map_frame.point.z:.2f})"
-					)
+					
 
 				except Exception as e:
 					self.get_logger().warn(f"Transform to map failed: {e}")
@@ -310,21 +362,21 @@ class DetectRings(Node):
 
 		if x_min >= x_max or y_min >= y_max:
 			self.get_logger().warn(f"Invalid ROI: [{x_min}:{x_max}, {y_min}:{y_max}]")
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		if not (x_min <= center_x < x_max and y_min <= center_y < y_max):
 			self.get_logger().warn(f"Center point ({center_x}, {center_y}) outside ROI")
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		centerDepth = a[center_y, center_x, 2]
 		depth = a[y_min:y_max, x_min:x_max, 2]
 
 		if depth.size == 0:
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		z_min = np.min(depth)
 		if z_min > 2:
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		z_range = centerDepth - z_min
 		ring_type = "3D" if z_range > 0.5 else "2D"
@@ -337,7 +389,7 @@ class DetectRings(Node):
 
 		if ring_pixels.size == 0:
 			self.get_logger().warn("No ring pixels found in mask.")
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		# Določimo dominantno barvo
 		rgb_pixels = [(int(p[2]), int(p[1]), int(p[0])) for p in ring_pixels]  # BGR -> RGB
@@ -351,32 +403,53 @@ class DetectRings(Node):
 		ellipse_points = cv2.ellipse2Poly((cx, cy), (axes_x, axes_y), angle, 0, 360, 1)
 		if ellipse_points.size == 0:
 			self.get_logger().warn("ellipse2Poly returned no points.")
-			return (False, None, None, None, None, None)
+			return (False, None, None, None, None, None, None)
 
 		best_y = -1
-		best_pt_2d = None
-		for px, py in ellipse_points:
+		best_left_x = width     # začnemo z večjim, ker iščemo minimalno x
+		best_right_x = -1       # začnemo z manjšim, ker iščemo maksimalno x
+
+		bottom_pt_2d = None
+		left_pt_2d   = None
+		right_pt_2d  = None
+
+		for (px, py) in ellipse_points:
+			# Preverimo, da ne gremo čez meje slike
 			if not (0 <= px < width and 0 <= py < height):
 				continue
-			z = a[py, px, 2]
-			if not np.isfinite(z):
+			
+			# Preverimo, da je globina veljavna (če želite izločiti NaN/Inf)
+			z_val = a[py, px, 2]
+			if not np.isfinite(z_val):
 				continue
+
+			# Najnižja (bottom) točka = največji y
 			if py > best_y:
 				best_y = py
-				best_pt_2d = (px, py)
+				bottom_pt_2d = (px, py)
 
-		if best_pt_2d is None:
-			self.get_logger().warn("No valid bottom point found on ellipse.")
-			return (False, None, None, None, None, None)
+			# Skrajno leva točka = najmanjši x
+			if px < best_left_x:
+				best_left_x = px
+				left_pt_2d  = (px, py)
 
-		bottom_x, bottom_y = best_pt_2d
-		coords_3d = a[bottom_y, bottom_x, :]  # (X, Y, Z) v kamerinem okviru
-		if not np.isfinite(coords_3d).all():
-			self.get_logger().warn("Bottom ellipse point has invalid (NaN/Inf) coords.")
-			return (False, None, None, None, None, None)
+			# Skrajno desna točka = največji x
+			if px > best_right_x:
+				best_right_x = px
+				right_pt_2d  = (px, py)
 
-		# Vrnemo 6 elementov: (valid, ring_type, ring_color, coords_3d, bottom_x, bottom_y)
-		return (True, ring_type, ring_color_name, coords_3d, bottom_x, bottom_y)
+		# Če so te točke None, pomeni, da nismo našli nobene veljavne točke na ustreznem koncu.
+		if bottom_pt_2d is None:
+			self.get_logger().warn("No valid bottom point on ellipse.")
+			return (False, None, None, None, None, None, None)
+		if left_pt_2d is None:
+			self.get_logger().warn("No valid leftmost point on ellipse.")
+			return (False, None, None, None, None, None, None)
+		if right_pt_2d is None:
+			self.get_logger().warn("No valid rightmost point on ellipse.")
+			return (False, None, None, None, None, None, None)
+
+		return (True, ring_type, ring_color_name, bottom_pt_2d, left_pt_2d, right_pt_2d, a)
 
 
 
