@@ -111,15 +111,8 @@ class detect_faces(Node):
 
 		try:
 			cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-			scale_factor = 10
-			enlarged_image = cv2.resize(
-				cv_image,
-				None,  
-				fx=scale_factor, 
-				fy=scale_factor, 
-				interpolation=cv2.INTER_LINEAR  
-			)
-			self.last_debug_image =  enlarged_image
+		
+			self.last_debug_image = cv_image
 
 			self.get_logger().info(f"Running inference on image...")
 
