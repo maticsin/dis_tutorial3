@@ -16,6 +16,9 @@ class TTSNode(Node):
         )
         # Initialize pyttsx3 for text-to-speech
         self.engine = pyttsx3.init()
+        
+        self.engine.setProperty('rate', 80)  # npr. 100 za počasnejše branje
+
 
         self.get_logger().info("TTS Node started. Waiting for messages on topic '/tts'...")
 

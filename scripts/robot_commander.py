@@ -26,6 +26,7 @@ from turtle_tf2_py.turtle_tf2_broadcaster import quaternion_from_euler
 
 from irobot_create_msgs.action import Dock, Undock
 from irobot_create_msgs.msg import DockStatus
+from std_srvs.srv import Trigger
 
 import rclpy
 from rclpy.action import ActionClient
@@ -70,6 +71,9 @@ class RobotCommander(Node):
         self.rings = 0
 
         self.Markers = None
+        self.image_cli = self.create_client(Trigger, 'request_image')
+        while not self.image_cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("Waiting for 'request_image' service...")
 
         # ROS2 subscribers
         self.create_subscription(DockStatus,
@@ -113,12 +117,6 @@ class RobotCommander(Node):
 
 
     def chain_sort_next_move(self):
-        """
-        Najprej ohranimo prvi element (t. i. 'trenutni cilj').
-        Za vse ostale točke v self.next_move izvedemo 'verižno' sortiranje,
-        kjer vsaka naslednja točka je najbližja prejšnji izbrani.
-        """
-
         # Če imamo manj kot 2 elementa, ni kaj sortirati
         if len(self.next_move) < 2:
             return
@@ -164,12 +162,17 @@ class RobotCommander(Node):
 
         
     def face_marker_callback(self, msg):
+        x = msg.pose.position.x
+        y = msg.pose.position.y
+        if math.isnan(x) or math.isnan(y):
+            self.get_logger().warn("Marker has NaN position, ignoring!")
+            return
         print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
 
         self.faces += 1
 
-        if self.faces == 3:
-            self.erasePath()
+        #if self.faces == 3:
+            #self.erasePath()
 
         #check for nex available spot in next move
 
@@ -181,12 +184,17 @@ class RobotCommander(Node):
             print(self.next_move)
 
     def ring_marker_callback(self, msg):
+        x = msg.pose.position.x
+        y = msg.pose.position.y
+        if math.isnan(x) or math.isnan(y):
+            self.get_logger().warn("Marker has NaN position, ignoring!")
+            return
         print(f'Received a marker: ID={msg.id}, position=({msg.pose.position.x}, {msg.pose.position.y}, {msg.pose.position.z}), yaw= {msg.pose.orientation}')
 
         self.rings += 1
 
-        if self.rings == 4:
-            self.erasePath()
+        #if self.rings == 4:
+            #self.erasePath()
 
         #check for nex available spot in next move
 
@@ -196,6 +204,7 @@ class RobotCommander(Node):
         if hasattr(self, 'current_pose'):
             self.chain_sort_next_move()
             print(self.next_move)
+
 
     def erasePath(self):
         self.next_move = [
@@ -465,9 +474,9 @@ def main(args=None):
 
     rc.next_move = [(-0.15, -1.5, rc.YawToQuaternion(4), "path"), 
                     (-0.8, -0.5, rc.YawToQuaternion(3), "path"), #
-                    (-1, 1, rc.YawToQuaternion(3), "path"), 
+                    (-1.3, 0.5, rc.YawToQuaternion(3), "path"), 
                     ( 0 , 2, rc.YawToQuaternion(0), "path"),
-                    ( -1.5 , 4, rc.YawToQuaternion(2), "path"), #
+                    ( -1.5 , 4.5, rc.YawToQuaternion(2), "path"), #
                     ( 0 , 3.3, rc.YawToQuaternion(4), "path"),
                     ( 1.5 , 3.3, rc.YawToQuaternion(4), "path"),
                     ( 2.2 , 2, rc.YawToQuaternion(3), "path"),
@@ -548,15 +557,17 @@ def main(args=None):
         if (rc.next_move[0][3] == "face"):
             
             msg = String()
-            msg.data = "Hello, there stranger hello."
+            msg.data = "Hello, there stranger."
             rc.tts_pub.publish(msg)
             rc.spoken = True
             rc.get_logger().info("Message published to /tts: Hello ") 
             print("Hello")
+            req = Trigger.Request()
+            future = rc.image_cli.call_async(req)
             time.sleep(3)
         elif (rc.next_move[0][3] == "ring"):
             msg = String()
-            msg.data = "Hello, there " + rc.next_move[0][4] + "ring hello."
+            msg.data = rc.next_move[0][4] + "ring"
             rc.tts_pub.publish(msg)
             rc.spoken = True
             rc.get_logger().info("Message published to /tts: Hello ") 
