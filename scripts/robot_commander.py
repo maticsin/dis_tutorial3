@@ -482,63 +482,7 @@ def main(args=None):
 
         rc.goToPose(rc.toPose(rc.next_move[0]))
         while not rc.isTaskComplete():
-            # rc.info("Waiting for the task to complete...")
-            # print(len(rc.next_move))
-            # rclpy.spin_once(rc)
-            if len(rc.next_move) >= 2:
-                if rc.next_move[1][3] == "face" and rc.next_move[0][3] == "path":
-                    #save current position to come back and move the next point not implemented
-                    curr_pose_stamped = PoseStamped()
-                    curr_pose_stamped.header.frame_id = 'map'
-                    curr_pose_stamped.header.stamp = rc.get_clock().now().to_msg()
-                    curr_pose_stamped.pose = rc.current_pose.pose
-
-                    curr_pos = (
-                        curr_pose_stamped.pose.position.x,
-                        curr_pose_stamped.pose.position.y,
-                        curr_pose_stamped.pose.orientation,
-                        "path_back"
-                    )
-
-                    curr_next_pos = rc.next_move[0]
-
-                    i = 1
-                    while i < len(rc.next_move) and rc.next_move[i][3] == "face":
-                        i += 1
-
-                    if(len(rc.next_move) > i):
-                        rc.next_move.insert(i, curr_pos)
-                        rc.next_move.insert(i+1, curr_next_pos)
-                    else: 
-                        rc.next_move.append(curr_pos)
-                        rc.next_move.append(curr_next_pos)
-
-                    print(len(rc.next_move))
-
-                    for a in rc.next_move:
-                        print(a[1])
-
-                    rc.cancelTask()
-                    print("canceled")
-                elif rc.next_move[1][3] == "face" and rc.next_move[0][3] == "path_back":
-                    curr_next_pos = rc.next_move[0]
-
-                    i = 1
-                    while i < len(rc.next_move) and rc.next_move[i][3] == "face":
-                        i += 1
-
-                    if(len(rc.next_move) > i):
-                        rc.next_move.insert(i, curr_next_pos)
-                    else: 
-                        rc.next_move.append(curr_next_pos)
-
-                    print(len(rc.next_move))
-
-                    for a in rc.next_move:
-                        print(a[1])
-
-                    rc.cancelTask()
-                    print("canceled")
+            rclpy.spin_once(rc, timeout_sec=0.1)
 
         #stop say hello
         if (rc.next_move[0][3] == "face"):
