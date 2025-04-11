@@ -115,50 +115,38 @@ class RobotCommander(Node):
         self.next_move = []
         self.get_logger().info(f"Robot commander has been initialized!")
 
+    
 
-    def chain_sort_next_move(self):
-        # Če imamo manj kot 2 elementa, ni kaj sortirati
+
+    def add_item_minpath(self, new_item):
+ 
+
+        def dist2D(x1, y1, x2, y2):
+            return math.hypot(x2 - x1, y2 - y1)
+
+
         if len(self.next_move) < 2:
+            self.next_move.append(new_item)
             return
 
-        # 1) Shranimo prvi element (trenutni cilj), ki se ne spreminja
-        first_item = self.next_move[0]
+        best_increase = float('inf')
+        best_index = len(self.next_move) 
 
-        # 2) Preostale točke damo v 'points'
-        points = self.next_move[1:]
 
-        # 3) Počistimo originalni seznam in vrnemo first_item nazaj
-        self.next_move = [first_item]
+        for i in range(len(self.next_move) - 1):
+            p_i = self.next_move[i]
+            p_ip1 = self.next_move[i+1]
 
-        # 4) current_position = pozicija first_item, ker želimo,
-        #    da se naslednje točke razvrstijo glede na njo in vse naslednje
-        current_position = (first_item[0], first_item[1])
+            cost_current = dist2D(p_i[0], p_i[1], p_ip1[0], p_ip1[1])
+            cost_new = dist2D(p_i[0], p_i[1], new_item[0], new_item[1]) \
+                    + dist2D(new_item[0], new_item[1], p_ip1[0], p_ip1[1])
 
-        ordered_path = []
+            delta = cost_new - cost_current
+            if delta < best_increase:
+                best_increase = delta
+                best_index = i+1 
 
-        # 5) Dokler ima 'points' točke, iščemo najbližjo k 'current_position'
-        while points:
-            nearest_idx = None
-            nearest_dist = float('inf')
-
-            for i, item in enumerate(points):
-                # item je (x, y, orientation, type, (optionally text))
-                dx = item[0] - current_position[0]
-                dy = item[1] - current_position[1]
-                dist = math.hypot(dx, dy)
-                if dist < nearest_dist:
-                    nearest_dist = dist
-                    nearest_idx = i
-
-            # Najbližjo odstranimo iz 'points' in jo dodamo v 'ordered_path'
-            best_item = points.pop(nearest_idx)
-            ordered_path.append(best_item)
-
-            # Posodobimo 'current_position'
-            current_position = (best_item[0], best_item[1])
-
-        # 6) Na koncu 'verižnega' iskanja dodamo 'ordered_path' na konec self.next_move
-        self.next_move.extend(ordered_path)
+        self.next_move.insert(best_index, new_item)
 
         
     def face_marker_callback(self, msg):
@@ -178,10 +166,7 @@ class RobotCommander(Node):
 
         marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "face")
 
-        self.next_move.append(marker_tuple)
-        if hasattr(self, 'current_pose'):
-            self.chain_sort_next_move()
-            print(self.next_move)
+        self.add_item_minpath(marker_tuple)
 
     def ring_marker_callback(self, msg):
         x = msg.pose.position.x
@@ -200,10 +185,7 @@ class RobotCommander(Node):
 
         marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "ring", msg.text) 
 
-        self.next_move.append(marker_tuple)
-        if hasattr(self, 'current_pose'):
-            self.chain_sort_next_move()
-            print(self.next_move)
+        self.add_item_minpath(marker_tuple)
 
 
     def erasePath(self):
@@ -503,9 +485,9 @@ def main(args=None):
     if rc.is_docked:
         rc.undock()
 
-    rc.next_move = [(-0.15, -1.5, rc.YawToQuaternion(4), "path"), 
+    rc.next_move = [(-0.20, -1.3, rc.YawToQuaternion(4), "path"), 
                     (-0.8, -0.5, rc.YawToQuaternion(3), "path"), #
-                    (-1.3, -0.5, rc.YawToQuaternion(3), "path"), 
+                    (-1.2, -0.3, rc.YawToQuaternion(3), "path"), 
                     ( 0 , 2, rc.YawToQuaternion(0), "path"),
                     ( -1.5 , 4.5, rc.YawToQuaternion(2), "path"), #
                     ( 0 , 3.3, rc.YawToQuaternion(4), "path"),
@@ -588,7 +570,7 @@ def main(args=None):
         if (rc.next_move[0][3] == "face"):
             
             msg = String()
-            msg.data = "Hello, there stranger."
+            msg.data = "Hello, stranger."
             rc.tts_pub.publish(msg)
             rc.spoken = True
             rc.get_logger().info("Message published to /tts: Hello ") 

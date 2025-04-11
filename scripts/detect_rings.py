@@ -54,7 +54,7 @@ class DetectRings(Node):
 		self.id = 0
 		self.latest_cloud = None
 		self.distTresh = 0.75
-		self.stopDist = 0.7
+		self.stopDist = 0.9
 		self.get_logger().info("Node initialized")
 	
 	def createMarker(self, data, pos, color, loc, text=""):
