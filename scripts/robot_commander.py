@@ -146,7 +146,7 @@ class RobotCommander(Node):
                 best_increase = delta
                 best_index = i+1 
 
-        self.next_move.insert(best_index, new_item)
+        #self.next_move.insert(best_index, new_item)
 
         
     def face_marker_callback(self, msg):
@@ -166,7 +166,7 @@ class RobotCommander(Node):
 
         marker_tuple = (msg.pose.position.x, msg.pose.position.y, msg.pose.orientation, "face")
 
-        self.add_item_minpath(marker_tuple)
+        #self.add_item_minpath(marker_tuple)
 
     def ring_marker_callback(self, msg):
         x = msg.pose.position.x
@@ -487,17 +487,21 @@ def main(args=None):
 
     rc.next_move = [(-0.20, -1.3, rc.YawToQuaternion(4), "path"), 
                     (-0.8, -0.5, rc.YawToQuaternion(3), "path"), #
-                    (-1.2, -0.3, rc.YawToQuaternion(3), "path"), 
-                    ( 0 , 2, rc.YawToQuaternion(0), "path"),
-                    ( -1.5 , 4.5, rc.YawToQuaternion(2), "path"), #
-                    ( 0 , 3.3, rc.YawToQuaternion(4), "path"),
-                    ( 1.5 , 3.3, rc.YawToQuaternion(4), "path"),
-                    ( 2.2 , 2, rc.YawToQuaternion(3), "path"),
-                    ( 1 , 0, rc.YawToQuaternion(5), "path"),
-                    ( 2.5 , -1, rc.YawToQuaternion(2), "path"),
-                    ( 2 , -1.8, rc.YawToQuaternion(5), "path"),
-                    ( 1 , -2, rc.YawToQuaternion(2), "path"),
-                    ( 0 , -2, rc.YawToQuaternion(2), "path"),]
+                    (-1.3, -0.3, rc.YawToQuaternion(3), "path"), 
+                    (-0.9, 0.2, rc.YawToQuaternion(3), "path"), 
+                    (-1.5, 1.2, rc.YawToQuaternion(3), "path"), 
+                    (-1.5 , 4.5, rc.YawToQuaternion(2), "path"),
+                    ( -1 , 3.2, rc.YawToQuaternion(0), "path"),
+                    ( 1.5 , 3.2, rc.YawToQuaternion(4), "path"),
+                    ( 2.5 , 2, rc.YawToQuaternion(4), "path"),
+                    ( -0.2, 1.7, rc.YawToQuaternion(4), "path"),
+                    ( 1, 2, rc.YawToQuaternion(4), "path"),
+                    ( 1,0, rc.YawToQuaternion(3), "path"),
+                    ( 2.2 , -0.2, rc.YawToQuaternion(5), "path"),
+                    ( 2.6 , -1.2, rc.YawToQuaternion(2), "path"),
+                    ( 1 , -2, rc.YawToQuaternion(5), "path"),
+                    ( -0.2 , -1.8, rc.YawToQuaternion(2), "path"),
+                    ( 0 , 0, rc.YawToQuaternion(2), "path"),]
     
 
 
