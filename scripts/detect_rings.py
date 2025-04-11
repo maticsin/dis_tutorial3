@@ -393,8 +393,36 @@ class DetectRings(Node):
 
 		if depth.size == 0:
 			return (False, None, None, None, None, None, None)
+		
+		(cx, cy) = (int(le[0][0]), int(le[0][1]))
+		(axes_x, axes_y) = (int(le[1][0] / 2), int(le[1][1] / 2))
+		angle = int(le[2])
+		ellipse_points = cv2.ellipse2Poly((cx, cy), (axes_x, axes_y), angle, 0, 360, 1)
+		if ellipse_points.size == 0:
+			self.get_logger().warn("ellipse2Poly returned no points.")
+			return (False, None, None, None, None, None, None)
 
-		z_min = np.min(depth)
+		best_top_y = height     # začnemo z manjšim, ker iščemo minimalno y
+		top_pt_2d  = None
+
+		for (px, py) in ellipse_points:
+			# Preverimo, da ne gremo čez meje slike
+			if not (0 <= px < width and 0 <= py < height):
+				continue
+			
+			# Preverimo, da je globina veljavna (če želite izločiti NaN/Inf)
+			z_val = a[py, px, 2]
+			if not np.isfinite(z_val):
+				continue
+
+			if py < best_top_y:
+				best_top_y = py
+				top_pt_2d = (px, py)
+
+		if top_pt_2d is None:
+			z_min = a[bottom_pt_2d[1], bottom_pt_2d[0], 2]
+		else:
+			z_min = np.min(depth)
 		print(f"z_min: {z_min}, centerDepth: {centerDepth}")
 		if z_min > 2:
 			return (False, None, None, None, None, None, None)
@@ -429,6 +457,7 @@ class DetectRings(Node):
 		best_y = -1
 		best_left_x = width     # začnemo z večjim, ker iščemo minimalno x
 		best_right_x = -1       # začnemo z manjšim, ker iščemo maksimalno x
+		best_top_y = height     # začnemo z manjšim, ker iščemo minimalno y
 
 		bottom_pt_2d = None
 		left_pt_2d   = None
@@ -458,6 +487,10 @@ class DetectRings(Node):
 			if px > best_right_x:
 				best_right_x = px
 				right_pt_2d  = (px, py)
+
+			if py < best_top_y:
+				best_top_y = py
+				top_pt_2d = (px, py)
 
 		# Če so te točke None, pomeni, da nismo našli nobene veljavne točke na ustreznem koncu.
 		if bottom_pt_2d is None:
